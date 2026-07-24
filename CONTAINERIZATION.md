@@ -155,5 +155,5 @@ La aplicación queda disponible en `http://localhost:8080/`.
 
 ## 7. Repositorio
 
-- Fork público: https://github.com/Main-Daniel/php-sample-application.git>
+- Fork público: https://github.com/Main-Daniel/php-sample-application
 - Este documento: https://github.com/Main-Daniel/php-sample-application/blob/master/CONTAINERIZATION.md
