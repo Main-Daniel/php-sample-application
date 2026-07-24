@@ -28,7 +28,35 @@ return new PDO(
 );
 ```
 
-Es el único cambio funcional en el código de la aplicación.
+Adicionalmente, durante las pruebas se detectó que `bootstrap.php`
+(el archivo que Apache antepone a cada request vía
+`auto_prepend_file`) nunca cargaba el autoloader de Composer, solo el
+autoloader propio del proyecto (para clases en `src/`). Esto provocaba
+un error 500 (`Class 'Negotiation\Negotiator' not found`) porque la
+librería externa `willdurand/negotiation` no llegaba a cargarse.
+
+Original:
+```php
+<?php
+
+require "autoloader.php";
+require "error_handler.php";
+```
+
+Modificado:
+```php
+<?php
+
+if (is_file(__DIR__ . "/vendor/autoload.php")) {
+    require __DIR__ . "/vendor/autoload.php";
+}
+
+require "autoloader.php";
+require "error_handler.php";
+```
+
+En total, dos cambios de código fueron necesarios para containerizar
+la aplicación: `config-dev/db-connection.php` y `bootstrap.php`.
 
 ## 2. Imagen `web` (aplicación)
 
@@ -39,10 +67,11 @@ Es el único cambio funcional en el código de la aplicación.
   etapa final que copia el código + `vendor/` sobre `php:7.4-apache`.
 - Extensiones habilitadas: `pdo`, `pdo_mysql`, `mysqli`.
 - Módulos Apache habilitados: `rewrite`, `deflate`, `headers`.
-- El VirtualHost (`apache-config/000-default.conf`) reproduce exactamente
-  la configuración indicada en el README original: `DocumentRoot` en
-  `web/`, `AllowOverride All`, `include_path` apuntando a la raíz del
-  proyecto, e `Include` del `config/vhost.conf` del propio repo.
+- El VirtualHost (`docker/app/apache-config/000-default.conf`) reproduce
+  exactamente la configuración indicada en el README original:
+  `DocumentRoot` en `web/`, `AllowOverride All`, `include_path` apuntando
+  a la raíz del proyecto, e `Include` del `config/vhost.conf` del propio
+  repo.
 - Se recrea el symlink `config -> config-dev` que en el proyecto original
   genera el `Makefile`.
 
@@ -53,10 +82,9 @@ Es el único cambio funcional en el código de la aplicación.
   `/docker-entrypoint-initdb.d/`, mecanismo estándar de la imagen oficial
   de MariaDB para inicializar el esquema y los datos de ejemplo en el
   primer arranque.
-- Usuario/base de datos (`sampleuser` / `sample` / `samplepass`) se crean
-  vía variables de entorno estándar de la imagen (`MARIADB_USER`,
-  `MARIADB_PASSWORD`, `MARIADB_DATABASE`), igual que el README pedía
-  crear manualmente.
+- Usuario y base de datos se crean vía variables de entorno estándar de
+  la imagen (`MARIADB_USER`, `MARIADB_PASSWORD`, `MARIADB_DATABASE`),
+  igual que el README pedía crear manualmente.
 
 ## 4. Estructura en el repositorio
 
@@ -78,19 +106,6 @@ carpeta `docker/app` ni `docker/db`), para poder copiar `composer.json`,
 `web/`, `src/` (en el caso de la app) y `sql/db.sql` (en el caso de la
 BD) sin duplicar archivos.
 
-## 5. Build y publicación en Docker Hub
-
-```bash
-# Desde la raíz del fork clonado
-docker login
-
-docker build -f docker/app/Dockerfile -t maindannyob/php-sample-app-web:latest .
-docker build -f docker/db/Dockerfile  -t maindannyob/php-sample-app-db:latest .
-
-docker push maindannyob/php-sample-app-web:latest
-docker push maindannyob/php-sample-app-db:latest
-```
-
 ## 5. Manejo de credenciales (seguridad)
 
 Ni `docker-compose.yml` ni los Dockerfiles contienen contraseñas en
@@ -98,52 +113,45 @@ texto plano. Las credenciales se inyectan mediante variables de
 entorno leídas desde un archivo `.env`:
 
 - `.env.example` (este sí está en el repo) documenta qué variables se
-  necesitan, con valores de ejemplo, **no** con secretos reales.
+  necesitan, con placeholders, **no** con secretos reales.
 - `.env` (el archivo real, con contraseñas reales) está excluido vía
-  `.gitignore` y **nunca se sube a GitHub**. Cada quien crea el suyo
-  localmente antes de ejecutar `docker compose up`.
-- El puerto de MariaDB no se publica al host (no hay `ports:` en el
-  servicio `db`), por lo que la base de datos solo es alcanzable
-  desde el contenedor `web` a través de la red interna de Compose.
+  `.gitignore` y **nunca se sube a GitHub**. Se crea localmente antes
+  de ejecutar `docker compose up` (las credenciales usadas para la
+  evaluación de esta prueba técnica se entregan aparte, en el archivo
+  `GUIA_EJECUCION.txt`, que no forma parte del repositorio).
+- El contenedor `db` no publica ningún puerto al host (no tiene
+  `ports:` en `docker-compose.yml`), por lo que la base de datos solo
+  es alcanzable desde el contenedor `web` a través de la red interna
+  de Docker Compose, nunca desde fuera de la máquina.
 - El usuario de la aplicación (`sampleuser`) tiene permisos únicamente
-  sobre la base `sample`, no es el usuario `root` de MariaDB
-  (principio de menor privilegio).
-
-## 6. Ejecución
-
-```bash
-docker compose up -d
-```
-
-La aplicación queda disponible en `http://localhost:8080/`.
-
-## 6. Gestión de credenciales (buenas prácticas)
-
-La primera versión de este entregable tenía las credenciales de la
-base de datos escritas directamente en `docker-compose.yml`. Se
-corrigió por lo siguiente:
-
-- **Problema**: credenciales en texto plano dentro de un archivo que
-  se sube a un repositorio público (fork) quedan expuestas a
-  cualquiera que vea el repo.
-- **Solución aplicada**: `docker-compose.yml` ahora referencia
-  variables de entorno (`${DB_USER}`, `${DB_PASSWORD}`,
-  `${DB_ROOT_PASSWORD}`, etc.) que Docker Compose toma automáticamente
-  de un archivo `.env` local.
-- `.env.example` sí se versiona en el repo, como plantilla, pero sin
-  valores reales.
-- `.env` (con las contraseñas reales) está excluido vía `.gitignore`
-  y nunca se sube a GitHub; cada quien lo genera localmente a partir
-  de la plantilla.
-- Adicionalmente, el contenedor `db` no expone su puerto al host
-  (no tiene `ports:` en `docker-compose.yml`), por lo que solo es
-  alcanzable desde el contenedor `web` dentro de la red interna de
-  Docker Compose, no desde fuera de la máquina.
+  sobre la base `sample`; la aplicación nunca se conecta con el
+  usuario `root` de MariaDB (principio de menor privilegio).
+- Las contraseñas usadas son generadas aleatoriamente (20 caracteres),
+  distintas para `root` y para `sampleuser`, en vez de los valores de
+  ejemplo débiles del README original (`samplepass`).
 
 Nota: por ser una aplicación de ejemplo (datos ficticios, sin
 información sensible real), el riesgo residual es bajo, pero se
 aplican estas prácticas para reflejar cómo se manejaría en un entorno
 productivo real.
+
+## 6. Build, publicación y ejecución
+
+```bash
+# Build y push (una sola vez, o cuando cambie el código)
+docker login
+docker build -f docker/app/Dockerfile -t maindannyob/php-sample-app-web:latest .
+docker build -f docker/db/Dockerfile  -t maindannyob/php-sample-app-db:latest .
+docker push maindannyob/php-sample-app-web:latest
+docker push maindannyob/php-sample-app-db:latest
+
+# Ejecución
+cp .env.example .env
+# editar .env con credenciales reales
+docker compose up -d
+```
+
+La aplicación queda disponible en `http://localhost:8080/`.
 
 ## 7. Repositorio
 
