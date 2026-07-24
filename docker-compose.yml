@@ -1,0 +1,38 @@
+services:
+  db:
+    image: maindannyob/php-sample-app-db:latest
+    container_name: php-sample-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    # No se publica ningun puerto de la BD al host: solo es
+    # alcanzable desde la red interna de docker-compose (por el
+    # servicio "web"). Esto reduce la superficie de ataque.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  web:
+    image: maindannyob/php-sample-app-web:latest
+    container_name: php-sample-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASSWORD}
+    ports:
+      - "8080:80"
+
+volumes:
+  db_data:

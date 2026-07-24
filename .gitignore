@@ -1,4 +1,9 @@
-config
+# Nunca subir credenciales reales al repositorio
+.env
+
+# Artefactos de composer / vendor (se generan en el build de Docker)
+vendor/
 composer.phar
-logs/*
-vendor
+
+# Symlink generado por el Makefile original
+config
